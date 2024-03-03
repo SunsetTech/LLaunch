@@ -1,16 +1,14 @@
-local lanes = require"lanes".configure()
-local http = require("coro-http-luv")
-local ltn12 = require("ltn12")
-local json = require("dkjson")
+local http = require"coro-http-luv"
+local json = require"dkjson"
+local posix = require"posix"
 local lfs = require"lfs"
 local Colors = require"Colors"
 local SteamConfig = require"SteamConfig"
-print(Colors)
-require"Moonrise.Import.Install".All() --forget if this is needed
 local UITree = require"UITree"
 
 local ShadowOffset = 8
 local Config={Colors = Colors}; Config = {
+	StartInGamermode = true;
 	ShadowOffset = ShadowOffset;
 	CardMargin = 1;
 	Inset = {
@@ -29,6 +27,14 @@ local Config={Colors = Colors}; Config = {
 			Launch = function(Path)
 				os.execute(
 					([["%s"]]):format(Path)
+				)
+			end;
+		};
+		Wine = {
+			Label = "Wine";
+			Launch = function(Path)
+				os.execute(
+					([[wine "%s"]]):format(posix.realpath(Path))
 				)
 			end;
 		};
@@ -80,6 +86,22 @@ local Config={Colors = Colors}; Config = {
 				)
 			end
 		};
+		RetroArch_Sameboy = {
+			Label = "RetroArch (Sameboy)";
+			Launch = function(Path)
+				os.execute(
+					([[retroarch -L sameboy "%s"]]):format(Path)
+				)
+			end;
+		};
+		RetroArch_mGBA = {
+			Label = "RetroArch (mGBA)";
+			Launch = function(Path)
+				os.execute(
+					([[retroarch -L mgba "%s"]]):format(Path)
+				)
+			end;
+		};
 		Cemu = {
 			Label = "Cemu",
 			Launch = function(Path)
@@ -91,8 +113,18 @@ local Config={Colors = Colors}; Config = {
 	};
 	
 	Collections = {
-		--[[{
-			Label = "Switch (Yuzu)";
+		{
+			Label = "Native";
+			Paths = {"/home/operator/Home/Games/Native/Links"};
+			Launchers = {"Native"};
+		};
+		{
+			Label = "Windows";
+			Paths = {"/home/operator/Home/Games/Windows/Links"};
+			Launchers = {"Wine"};
+		};
+		{
+			Label = "Switch";
 			Paths = {"/home/operator/Home/Games/Switch/ROMs"};
 			Launchers = {"Yuzu", "Ryujinx"};
 		};
@@ -120,25 +152,36 @@ local Config={Colors = Colors}; Config = {
 			Label = "SNES";
 			Paths = {"/home/operator/Home/Games/SNES/ROMs"};
 			Launchers = {"RetroArch_BSNES"};
-		};]]
+		};
+		{
+			Label = "Game Boy";
+			Paths = {"/home/operator/Home/Games/Game Boy"};
+			Launchers = {"RetroArch_Sameboy"};
+		};
+		{
+			Label = "Game Boy Color";
+			Paths = {"/home/operator/Home/Games/Game Boy Color"};
+			Launchers = {"RetroArch_Sameboy"};
+		};
+		{
+			Label = "Game Boy Advance";
+			Paths = {"/home/operator/Home/Games/Game Boy Advance"};
+			Launchers = {"RetroArch_mGBA"};
+		};
 		{
 			Label = "SNES Romhacks";
 			Paths = {"/home/operator/Home/Games/SNES/Hacks"};
 			Launchers = {"RetroArch_BSNES"};
 		};
 		{
-			Label = "Native";
-			Paths = {"/home/operator/Home/Games/Native/Links"};
-			Launchers = {"Native"};
-		};
-		{
 			Label = "Steam";
 			Paths = {"/home/operator/.steam/steam/steamapps"};
 			Launchers = {"Steam"};
 			Scan = function(CollectionConfig)
+				print"???"
 				local CollectionTotal = 0
 				local List = {
-					UITree.Element.Text("Loading",{},"Loading...")
+					UITree.Output.Text("Loading",{},"Loading...")
 				}
 				coroutine.wrap(
 					function()
@@ -159,7 +202,7 @@ local Config={Colors = Colors}; Config = {
 							CollectionTotal = CollectionTotal + 1
 							table.insert(
 								List,
-								UITree.Element.Action(
+								UITree.Input.Action(
 									Game.name, {Color = Installed and Config.Colors.Steam.Installed or nil}, Game.name .. (Installed and " [Installed]" or ""),
 									function()
 										love.window.setFullscreen(false)

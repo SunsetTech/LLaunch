@@ -1,18 +1,31 @@
 local luv = require"luv"
 local lfs = require"lfs"
+local http = require"coro-http-luv"
+local json = require"dkjson"
+local posix = require"posix"
+local websocket = require"http.websocket"
+local lsha2 = require"lsha2"
+local mime = require"mime"
+io.popen[[lua ProcessSocket.lua "asld asdildasl askldask"]]
 package.path = package.path ..";./?/init.lua"
+require "Moonrise.Import.Install".All()
 local Config = require"Config"
 local Colors = Config.Colors
 local OOP = require"Moonrise.OOP"
 local UITree = require"UITree"
+local FocusHandler = require"FocusHandler"
+local Service = require"Service"
+local CardSet = require"CardSet"
+
+local Services = Service.Pool()
+local ConfigInterface = require"Interfaces.Config"(Config, Services)
 
 local AppExitedAt = 0
 local CollectionTotal = 0
 
-local CollectionElements = {
-}
+local CollectionElements = {--[[ServicesInterface]]}
 
-local ControlInterface = UITree.Element.Collection(
+local ControlInterface = UITree.Collection(
 	"Collections", {},
 	CollectionElements
 )
@@ -22,10 +35,10 @@ for _, Collection in pairs(Config.Collections) do
 	for _, LauncherName in pairs(Collection.Launchers) do
 		table.insert(
 			LauncherOptions,
-			UITree.Element.Text("Launcher Name", {}, Config.Launchers[LauncherName].Label)
+			UITree.Output.Text("Launcher Name", {}, Config.Launchers[LauncherName].Label)
 		)
 	end
-	local LauncherSelect = UITree.Element.Choice("Collection Launcher",{},LauncherOptions)
+	local LauncherSelect = UITree.Input.Choice("Collection Launcher",{},LauncherOptions)
 	
 	local CollectionGames = {}
 	
@@ -40,14 +53,14 @@ for _, Collection in pairs(Config.Collections) do
 					CollectionTotal = CollectionTotal + 1
 					table.insert(
 						CollectionGames, 
-						UITree.Element.Action(
+						UITree.Input.Action(
 							File, {},
 							File,
 							function()
 								love.window.setFullscreen(false)
 								Config.Launchers[Collection.Launchers[LauncherSelect.Selected]].Launch(Fullpath)
 								love.window.setFullscreen(true, "desktop")
-								AppExitedAt = os.time()
+								AppExitedAt = love.timer.getTime()
 							end
 						)
 					)
@@ -61,11 +74,11 @@ for _, Collection in pairs(Config.Collections) do
 		end
 	)
 	table.insert(
-		CollectionElements, UITree.Element.Collection(
+		CollectionElements, UITree.Collection(
 			Collection.Label, {},
 			{
 				LauncherSelect,
-				UITree.Element.Collection(
+				UITree.Collection(
 					"Games", {},
 					CollectionGames
 				)
@@ -74,142 +87,90 @@ for _, Collection in pairs(Config.Collections) do
 	)
 end
 
-FocusStack = {}
-
-local function PushFocus(Index, Element)
-	table.insert(
-		FocusStack, {
-			Element = Element;
-			Index = Index;
-		}
-	)
-end
-
-local function PopFocus()
-	return table.remove(FocusStack)
-end
-
-local function GetFocus()
-	return FocusStack[#FocusStack]
-end
-
-local function GetFocusParent()
-	return FocusStack[#FocusStack-1]
-end
-
-local function FindFirstFocus(Index, Element)
-	PushFocus(Index, Element)
-	if OOP.Reflection.Type.Of(UITree.Element.Collection, Element) then
-		FindFirstFocus(1, Element.Children[1])
-	end
-end
-
-local function FindLastFocus(Index, Element)
-	PushFocus(Index, Element)
-	if OOP.Reflection.Type.Of(UITree.Element.Collection, Element) then
-		FindLastFocus(#Element.Children, Element.Children[#Element.Children])
-	end
-end
-
-local function FindPrevFocus()
-	local Current = PopFocus()
-	local Parent = GetFocus()
-	if Current.Index == 1 then
-		if #FocusStack == 1 then
-			FindFirstFocus(Current.Index, Current.Element) --kind of inefficient to do this but it was easy to write
-		else
-			FindPrevFocus()
-		end
-	else
-		local Index = Current.Index - 1
-		local NewFocus = Parent.Element.Children[Index]
-		if OOP.Reflection.Type.Of(UITree.Element.Collection, NewFocus) then
-			FindLastFocus(Index, NewFocus)
-		else
-			PushFocus(Index, NewFocus)
-		end
-	end
-end
-
-local function FindNextFocus()
-	local Current = PopFocus()
-	local Parent = GetFocus()
-	if Current.Index == #Parent.Element.Children then
-		if #FocusStack == 1 then
-			FindLastFocus(Current.Index, Current.Element)
-		else
-			FindNextFocus()
-		end
-	else
-		local Index = Current.Index + 1
-		local NewFocus = Parent.Element.Children[Index]
-		if OOP.Reflection.Type.Of(UITree.Element.Collection, NewFocus) then
-			FindFirstFocus(Index, NewFocus)
-		else
-			PushFocus(Index, NewFocus)
-		end
-	end
-end
-
+local CardFocus = FocusHandler()
 local CollectionIndex = 1
-FindFirstFocus(1, ControlInterface.Children[CollectionIndex])
+CardFocus:FindFirstFocus(1, ControlInterface.Children[CollectionIndex])
 
+local GlobalFont
 function love.load()
-	love.window.setMode(800,600,{display=2})
-	love.window.setFullscreen(true, "desktop")
+	math.randomseed(os.time())
+    GlobalFont = love.graphics.newFont("GlobalFont.ttf",12)
+
+    love.graphics.setFont(GlobalFont)
 end
 
 local NextTwitch = 0
 local ActiveController
+local UpHeld, DownHeld = false, false
+local CollectionsCardSet = CardSet(ControlInterface)
+local ConfigCardSet = CardSet(ConfigInterface)
+local ActiveCardSet = CollectionsCardSet
+
 function love.gamepadpressed(Controller, Button)
+	if love.timer.getTime() <= AppExitedAt+1 then return end
+	
 	ActiveController = Controller
-	local CurrentFocus = GetFocus().Element
-	if os.time() == AppExitedAt then return end
+	local CurrentFocus = CardFocus:GetFocus().Element
 	if (Controller:isGamepadDown"guide") then
 		if Controller:isGamepadDown"back" then
-			os.exit(0)
+			love.event.quit(0)
 		elseif Controller:isGamepadDown"start" then
 			love.window.setFullscreen(not love.window.getFullscreen(),"desktop")
+		elseif Controller:isGamepadDown"dpup" then
+			ActiveCardSet = ConfigCardSet
+			CardFocus:Clear()
+			CardFocus:FindFirstFocus(1, ActiveCardSet:GetUI())
+		elseif Controller:isGamepadDown"dpdown" then
+			ActiveCardSet = CollectionsCardSet
+			CardFocus:Clear()
+			CardFocus:FindFirstFocus(1, ActiveCardSet:GetUI())
 		end
 	elseif Button == "leftshoulder" then
-		CollectionIndex = (CollectionIndex-2)%#ControlInterface.Children+1
-		local Collection = ControlInterface.Children[CollectionIndex]
-		FocusStack = {}
-		FindFirstFocus(1, Collection)
-		--SelectionIndex = 1
+		ActiveCardSet:ShiftLeft()
+		CardFocus:Clear()
+		CardFocus:FindFirstFocus(1, ActiveCardSet:GetUI())
 	elseif Button == "rightshoulder" then
-		CollectionIndex = CollectionIndex%#ControlInterface.Children+1
-		local Collection = ControlInterface.Children[CollectionIndex]
-		FocusStack = {}
-		FindFirstFocus(1, Collection)
-		--SelectionIndex = 1
+		ActiveCardSet:ShiftRight()
+		CardFocus:Clear()
+		CardFocus:FindFirstFocus(1, ActiveCardSet:GetUI())
 	elseif Button == "dpdown" then
-		FindNextFocus()
-		--SelectionIndex = SelectionIndex + 1
+		CardFocus:FindNextFocus()
+		DownHeld = true
 		NextTwitch = love.timer.getTime() + 0.25
 	elseif Button == "dpup" then
-		FindPrevFocus()
-		--SelectionIndex = SelectionIndex - 1
+		CardFocus:FindPrevFocus()
+		UpHeld = true
 		NextTwitch = love.timer.getTime() + 0.25
-	elseif Button == "dpleft" and OOP.Reflection.Type.Of(UITree.Element.Choice, CurrentFocus) and CurrentFocus.Selected > 1 then
+	elseif Button == "dpleft" and OOP.Reflection.Type.Of(UITree.Input.Choice, CurrentFocus) and CurrentFocus.Selected > 1 then
 		CurrentFocus.Selected = CurrentFocus.Selected - 1
-	elseif Button == "dpright" and OOP.Reflection.Type.Of(UITree.Element.Choice, CurrentFocus) and CurrentFocus.Selected < #CurrentFocus.Options then
+	elseif Button == "dpright" and OOP.Reflection.Type.Of(UITree.Input.Choice, CurrentFocus) and CurrentFocus.Selected < #CurrentFocus.Options then
 		CurrentFocus.Selected = CurrentFocus.Selected + 1
 	elseif Button == "b" or Button == "a" or Button == "x" or Button == "y" then
-		if (OOP.Reflection.Type.Of(UITree.Element.Action, CurrentFocus)) then
+		if (OOP.Reflection.Type.Of(UITree.Input.Action, CurrentFocus)) then
 			CurrentFocus:Execute()
+		elseif OOP.Reflection.Type.Of(UITree.Input.Boolean, CurrentFocus) then
+			CurrentFocus:SetValue(not CurrentFocus:GetValue())
 		end
 	end
 end
 
-function love.update()
+function love.gamepadreleased(Controller, Button)
+	if Button == "dpdown" then
+		DownHeld = false
+	elseif Button == "dpup" then
+		UpHeld = false
+	end
+end
+
+function love.update(dt)
+	--print(love.timer.getTime())
 	luv.run"nowait"
 	if ActiveController and love.timer.getTime() >= NextTwitch then
-		if ActiveController:isGamepadDown"dpup" then
-			FindPrevFocus()
+		if UpHeld then
+			CardFocus:FindPrevFocus()
 			NextTwitch = love.timer.getTime() + 0.025
-		elseif ActiveController:isGamepadDown"dpdown" then
-			FindNextFocus()
+		elseif DownHeld then
+			CardFocus:FindNextFocus()
 			NextTwitch = love.timer.getTime() + 0.025
 		end
 	end
@@ -222,6 +183,37 @@ function love.resize(Width, Height)
 	ContainerHalfHeight = math.floor(Height/TextHeight/2)
 end
 
+local function RenderCard(CardOrigin, CardSize, CardColor, ShadowColor, BorderColor, ShadowOffset, CardBorder)
+	local ShadowOrigin = {
+		CardOrigin[1]-ShadowOffset,
+		CardOrigin[2]-ShadowOffset
+	}
+	local BorderOrigin = {
+		CardOrigin[1]-CardBorder,
+		CardOrigin[2]-CardBorder
+	}
+	local BorderSize = {
+		CardSize[1]+CardBorder*2,
+		CardSize[2]+CardBorder*2
+	}
+	love.graphics.setScissor(
+		ShadowOrigin[1], ShadowOrigin[2],
+		CardSize[1], CardSize[2]
+	)
+	love.graphics.clear(ShadowColor)
+	love.graphics.setScissor(
+		BorderOrigin[1], BorderOrigin[2],
+		BorderSize[1], BorderSize[2]
+	)
+	love.graphics.clear(BorderColor)
+	love.graphics.setScissor(
+		CardOrigin[1], CardOrigin[2],
+		CardSize[1], CardSize[2]
+	)
+	love.graphics.clear(CardColor)
+end
+
+local IndentString = "  "
 function love.draw()
 	local Indent = 0
 	local TextStrings
@@ -231,21 +223,21 @@ function love.draw()
 	end
 	
 	local function Line(Contents, Color)
-		Print(string.rep("  ",Indent).. Contents .."\n", Color)
+		Print(string.rep(IndentString,Indent).. Contents .."\n", Color)
 	end
 	
 	local function Render(Element)
-		if Element == GetFocus().Element then
+		if Element == CardFocus:GetFocus().Element then
 			Print">"
 		end
 		
-		if OOP.Reflection.Type.Of(UITree.Element.Collection, Element) then
+		if OOP.Reflection.Type.Of(UITree.Collection, Element) then
 			Line(Element.Name, Element.Hints.Color)
 			Indent = Indent + 1
 			
 			local StartIndex, EndIndex
-			if GetFocusParent().Element == Element then
-				StartIndex = math.max(1,GetFocus().Index - ContainerHalfHeight)
+			if CardFocus:GetFocusParent().Element == Element then
+				StartIndex = math.max(1,CardFocus:GetFocus().Index - ContainerHalfHeight)
 				EndIndex = math.min(StartIndex + ContainerHalfHeight*2, #Element.Children)
 			else
 				StartIndex = 1
@@ -258,9 +250,9 @@ function love.draw()
 			end
 			
 			Indent = Indent - 1
-		elseif OOP.Reflection.Type.Of(UITree.Element.Text, Element) then
+		elseif OOP.Reflection.Type.Of(UITree.Output.Text, Element) then
 			Line(Element.Contents, Element.Hints.Color)
-		elseif OOP.Reflection.Type.Of(UITree.Element.Choice, Element) then
+		elseif OOP.Reflection.Type.Of(UITree.Input.Choice, Element) then
 			Line(Element.Name, Element.Hints.Color)
 			Indent = Indent + 1
 			for Index, Option in pairs(Element.Options) do
@@ -270,8 +262,18 @@ function love.draw()
 				Render(Option)
 			end
 			Indent = Indent - 1
-		elseif OOP.Reflection.Type.Of(UITree.Element.Action, Element) then
-			Line(Element.Label, Element.Hints.Color)
+		elseif OOP.Reflection.Type.Of(UITree.Input.Action, Element) then
+			Line(" ■  ".. Element.Label, Element.Hints.Color)
+		elseif OOP.Reflection.Type.Of(UITree.Input.Boolean, Element) then
+			Print(string.rep(IndentString, Indent))
+			Print"("
+			Print(Element:GetValue() and "●" or " ", Element:GetValue() and {0,1,0} or {1,0,0})
+			Print(") ".. Element.Name .."\n")
+		elseif OOP.Reflection.Type.Of(UITree.Output.Boolean, Element) then
+			Print(string.rep(IndentString, Indent))
+			Print(Element.Name ..": ")
+			Print(Element:GetValue() and "yes" or "no", Element:GetValue() and {0,1,0} or {1,0,0})
+			Print"\n"
 		end
 	end
 	local CollectionTotal = 0
@@ -280,10 +282,22 @@ function love.draw()
 	end
 	local TitleText = love.graphics.newText(love.graphics.getFont(), CollectionTotal .." games across ".. #ControlInterface.Children .." collections")
 	love.graphics.clear(Colors.Background)
-	love.graphics.setScissor(0,0,love.graphics.getWidth(),TitleText:getHeight())
-	love.graphics.clear(Colors.Title)
+	local Divisions = math.floor((math.sin(love.timer.getTime()/5)+1)/2*100)*2+3
+	local DivisionHeight = love.graphics.getHeight()/Divisions
+	love.graphics.setColor(1-Colors.Background[1],1-Colors.Background[2],1-Colors.Background[3])
+	for i = 1, Divisions do
+		if i%2==0 then
+			love.graphics.rectangle("fill",0,math.floor((i-1)*DivisionHeight),love.graphics.getWidth(),math.floor(DivisionHeight))
+		end
+	end
+	--love.graphics.setScissor(0,0,love.graphics.getWidth(),TitleText:getHeight())
+	love.graphics.setColor(Colors.Title)
+	love.graphics.rectangle("fill",0,0,love.graphics.getWidth(),TitleText:getHeight())
 	love.graphics.setColor(Colors.Text)
 	love.graphics.draw(TitleText)
+	if ActiveController and ActiveController:isGamepadDown"guide" then
+		love.graphics.rectangle("fill", love.graphics.getWidth()-50,0,50,50)
+	end
 	for Offset = -Config.CardsLeft,Config.CardsRight do
 		local CardColor = Colors.Card.Unfocused.Body
 		local CardShadow = Colors.Card.Unfocused.Shadow
@@ -305,39 +319,20 @@ function love.draw()
 			CardSize[1] = CardSize[1] - Config.UnfocusedCardShrink*2
 			CardSize[2] = CardSize[2] - Config.UnfocusedCardShrink*2
 		end
-		local ShadowOrigin = {
-			CardOrigin[1]-Config.ShadowOffset,
-			CardOrigin[2]-Config.ShadowOffset
-		}
-		local BorderOrigin = {
-			CardOrigin[1]-Config.CardBorder,
-			CardOrigin[2]-Config.CardBorder
-		}
-		local BorderSize = {
-			CardSize[1]+Config.CardBorder*2,
-			CardSize[2]+Config.CardBorder*2
-		}
-		love.graphics.setScissor(
-			ShadowOrigin[1], ShadowOrigin[2],
-			CardSize[1], CardSize[2]
+		RenderCard(
+			CardOrigin, CardSize,
+			CardColor, CardShadow, Colors.Card.Border,
+			Config.ShadowOffset, Config.CardBorder
 		)
-		love.graphics.clear(CardShadow)
-		love.graphics.setScissor(
-			BorderOrigin[1], BorderOrigin[2],
-			BorderSize[1], BorderSize[2]
-		)
-		love.graphics.clear(Colors.Card.Border)
-		love.graphics.setScissor(
-			CardOrigin[1], CardOrigin[2],
-			CardSize[1], CardSize[2]
-		)
-		love.graphics.clear(CardColor)
 		TextStrings = {}
-		local CollectionInterface = ControlInterface.Children[(CollectionIndex-1+Offset)%(#ControlInterface.Children)+1]
+		local CollectionInterface = ActiveCardSet:GetUI(Offset)
 		if CollectionInterface then
+			--Line(#CollectionInterface.Children[2].Children .." games")
+			--Line""
 			Render(CollectionInterface)
 			local TextObject = love.graphics.newText(love.graphics.getFont(),"")
 			TextObject:add(TextStrings,0,0)
+			love.graphics.setColor(Colors.Text)
 			love.graphics.draw(
 				TextObject,
 				math.floor(CardOrigin[1]), math.floor(CardOrigin[2])
@@ -345,4 +340,9 @@ function love.draw()
 		end
 		love.graphics.setScissor()
 	end
+end
+
+function love.quit()
+	print"Goodbye"
+	Services:StopAndRemoveAll()
 end
