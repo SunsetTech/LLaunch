@@ -2,7 +2,7 @@ local posix = require"posix"
 local luv = require"luv"
 
 local UITree = require"UITree"
-local GamerMode = require"Services.GamerMode"
+local FocusMode = require"Services.FocusMode"
 local OBS = require"Services.OBS"
 local Program = require"Service.Program"
 
@@ -37,50 +37,23 @@ local function detectOBS()
 end
 
 return function(Config, Services)
-	local GamermodeService
-	local GamermodeActive = UITree.Output.Boolean("Active",{},false)
-	if Config.StartInGamermode then
-		GamermodeService = GamerMode()
-		GamermodeActive.Value = true
-		Services:Add(GamermodeService)
-	end
-
-	local GamermodeInterface = UITree.Collection(
-		"Gamer Mode", {}, {
-			GamermodeActive,
-			UITree.Input.Action(
-				"Enable/Disable", {}, "Enable/Disable", function()
-					if GamermodeActive:GetValue() then
-						assert(GamermodeService)
-						Services:StopAndRemove(GamermodeService)
-						GamermodeActive.Value = false
-						GamermodeService = nil
-					else
-						GamermodeService = GamerMode()
-						GamermodeActive.Value = true
-						Services:Add(GamermodeService)
-					end
-				end
-			)
-		}
-	)
-
 	local OBSRunning = UITree.Output.Boolean("Running",{},false)
 	local OBSService
 	local StartOBSStreaming = UITree.Input.Boolean("Start streaming on launch", {}, false)
-
+	local StartOBSRecording = UITree.Input.Boolean("Start recording on launch", {}, false)
 	local OBSInterface = UITree.Collection(
 		"OBS", {}, {
 			OBSRunning,
 			StartOBSStreaming,
+			StartOBSRecording,
 			UITree.Input.Action(
-				"Start/Stop", {}, "Start/Stop", function() --TODO steam takes a while to be ready to launch games and shutdown when told, a spinner would be nice but this requires a bit of architecting
+				"Start/Stop", {}, "Start/Stop", function()
 					if OBSRunning:GetValue() then
 						Services:StopAndRemove(OBSService)
 						OBSRunning.Value = false
 						OBSService = nil
 					else
-						OBSService = OBS(StartOBSStreaming:GetValue(), "SoonSoon", 4455, "wiorfajesfoijdsfioasji")
+						OBSService = OBS(StartOBSStreaming:GetValue(), StartOBSRecording:GetValue(), "SoonSoon", 4455, "wiorfajesfoijdsfioasji")
 						Services:Add(OBSService)
 						OBSRunning.Value = true
 					end
@@ -140,13 +113,41 @@ return function(Config, Services)
 		}
 	)
 
+	local FocusmodeService
+	local FocusmodeActive = UITree.Output.Boolean("Active",{},false)
+	if Config.StartInFocusmode then
+		FocusmodeService = FocusMode()
+		FocusmodeActive.Value = true
+		Services:Add(FocusmodeService)
+	end
+
+	local FocusmodeInterface = UITree.Collection(
+		"Focus Mode", {}, {
+			FocusmodeActive,
+			UITree.Input.Action(
+				"Enable/Disable", {}, "Enable/Disable", function()
+					if FocusmodeActive:GetValue() then
+						assert(FocusmodeService)
+						Services:StopAndRemove(FocusmodeService)
+						FocusmodeActive.Value = false
+						FocusmodeService = nil
+					else
+						FocusmodeService = FocusMode()
+						FocusmodeActive.Value = true
+						Services:Add(FocusmodeService)
+					end
+				end
+			)
+		}
+	)
+
 	local ServiceInterfaces = {
 		OBSInterface,
 		SteamInterface
 	}
 
 	if checkPolybarAndI3() then
-		table.insert(ServiceInterfaces, GamermodeInterface)
+		table.insert(ServiceInterfaces, FocusmodeInterface)
 	end
 
 	return UITree.Collection(

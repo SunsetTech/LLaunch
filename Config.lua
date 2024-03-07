@@ -8,7 +8,7 @@ local UITree = require"UITree"
 
 local ShadowOffset = 8
 local Config={Colors = Colors}; Config = {
-	StartInGamermode = true;
+	StartInFocusmode = true;
 	ShadowOffset = ShadowOffset;
 	CardMargin = 1;
 	Inset = {

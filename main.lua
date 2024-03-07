@@ -6,7 +6,6 @@ local posix = require"posix"
 local websocket = require"http.websocket"
 local lsha2 = require"lsha2"
 local mime = require"mime"
-io.popen[[lua ProcessSocket.lua "asld asdildasl askldask"]]
 package.path = package.path ..";./?/init.lua"
 require "Moonrise.Import.Install".All()
 local Config = require"Config"
@@ -19,77 +18,14 @@ local CardSet = require"CardSet"
 
 local Services = Service.Pool()
 local ConfigInterface = require"Interfaces.Config"(Config, Services)
+local CollectionsInterface = require"Interfaces.Collections"(Config)
+local ListsInterface = require"Interfaces.Lists"(Config, CollectionsInterface)
 
 local AppExitedAt = 0
-local CollectionTotal = 0
-
-local CollectionElements = {--[[ServicesInterface]]}
-
-local ControlInterface = UITree.Collection(
-	"Collections", {},
-	CollectionElements
-)
-
-for _, Collection in pairs(Config.Collections) do
-	local LauncherOptions = {}
-	for _, LauncherName in pairs(Collection.Launchers) do
-		table.insert(
-			LauncherOptions,
-			UITree.Output.Text("Launcher Name", {}, Config.Launchers[LauncherName].Label)
-		)
-	end
-	local LauncherSelect = UITree.Input.Choice("Collection Launcher",{},LauncherOptions)
-	
-	local CollectionGames = {}
-	
-	if Collection.Scan then
-		CollectionGames, SubTotal = Collection.Scan(Collection)
-		--CollectionTotal = CollectionTotal + SubTotal
-	else
-		for _, Path in pairs(Collection.Paths) do
-			for File in lfs.dir(Path) do
-				if (File ~= "." and File ~= "..") then
-					local Fullpath = Path .."/".. File
-					CollectionTotal = CollectionTotal + 1
-					table.insert(
-						CollectionGames, 
-						UITree.Input.Action(
-							File, {},
-							File,
-							function()
-								love.window.setFullscreen(false)
-								Config.Launchers[Collection.Launchers[LauncherSelect.Selected]].Launch(Fullpath)
-								love.window.setFullscreen(true, "desktop")
-								AppExitedAt = love.timer.getTime()
-							end
-						)
-					)
-				end
-			end
-		end
-	end
-	table.sort(
-		CollectionGames, function(Left, Right)
-			return Left.Name < Right.Name
-		end
-	)
-	table.insert(
-		CollectionElements, UITree.Collection(
-			Collection.Label, {},
-			{
-				LauncherSelect,
-				UITree.Collection(
-					"Games", {},
-					CollectionGames
-				)
-			}
-		)
-	)
-end
 
 local CardFocus = FocusHandler()
 local CollectionIndex = 1
-CardFocus:FindFirstFocus(1, ControlInterface.Children[CollectionIndex])
+CardFocus:FindFirstFocus(1, CollectionsInterface.Children[CollectionIndex])
 
 local GlobalFont
 function love.load()
@@ -102,7 +38,7 @@ end
 local NextTwitch = 0
 local ActiveController
 local UpHeld, DownHeld = false, false
-local CollectionsCardSet = CardSet(ControlInterface)
+local CollectionsCardSet = CardSet(CollectionsInterface)
 local ConfigCardSet = CardSet(ConfigInterface)
 local ActiveCardSet = CollectionsCardSet
 
@@ -277,10 +213,10 @@ function love.draw()
 		end
 	end
 	local CollectionTotal = 0
-	for _, CollectionInterface in pairs(ControlInterface.Children) do
+	for _, CollectionInterface in pairs(CollectionsInterface.Children) do
 		CollectionTotal = CollectionTotal + #CollectionInterface.Children[2].Children
 	end
-	local TitleText = love.graphics.newText(love.graphics.getFont(), CollectionTotal .." games across ".. #ControlInterface.Children .." collections")
+	local TitleText = love.graphics.newText(love.graphics.getFont(), CollectionTotal .." games across ".. #CollectionsInterface.Children .." collections")
 	love.graphics.clear(Colors.Background)
 	local Divisions = math.floor((math.sin(love.timer.getTime()/5)+1)/2*100)*2+3
 	local DivisionHeight = love.graphics.getHeight()/Divisions

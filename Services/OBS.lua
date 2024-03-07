@@ -11,7 +11,7 @@ local OBS = OOP.Declarator.Shortcuts(
 	}
 )
 
-function OBS:Initialize(Instance, StartStreaming, StartScene, WebsocketPort, WebsocketPassword)
+function OBS:Initialize(Instance, StartStreaming, StartRecording, StartScene, WebsocketPort, WebsocketPassword)
 	self.WebsocketPort = WebsocketPort or 4455
 	self.WebsocketPassword = WebsocketPassword or "qwiorjqwioasjd"
 		OBS.Parents.Program:Initialize(
@@ -22,6 +22,7 @@ function OBS:Initialize(Instance, StartStreaming, StartScene, WebsocketPort, Web
 				"--websocket_port", self.WebsocketPort;
 				"--websocket_password", self.WebsocketPassword;
 				StartStreaming and "--startstreaming" or "";
+				StartRecording and "--startrecording" or "";
 			}
 		)
 end
