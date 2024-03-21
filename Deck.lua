@@ -1,23 +1,23 @@
 local OOP = require"Moonrise.OOP"
 
-local CardSet = OOP.Declarator.Shortcuts"LLaunch.CardSet"
+local Deck = OOP.Declarator.Shortcuts"LLaunch.Deck"
 
-function CardSet:Initialize(Instance, UIRoot)
+function Deck:Initialize(Instance, UIRoot)
 	Instance.UIRoot = UIRoot
 	Instance.Index = 1
 end
 
-function CardSet:ShiftLeft()
+function Deck:ShiftLeft()
 	self.Index = (self.Index-2)%#self.UIRoot.Children+1
 end
 
-function CardSet:ShiftRight()
+function Deck:ShiftRight()
 	self.Index = self.Index%#self.UIRoot.Children+1
 end
 
-function CardSet:GetUI(Offset)
+function Deck:GetUI(Offset)
 	Offset = (Offset == nil) and 0 or Offset
 	return self.UIRoot.Children[(self.Index-1+Offset)%(#self.UIRoot.Children)+1]
 end
 
-return CardSet
+return Deck

@@ -178,17 +178,21 @@ local Config={Colors = Colors}; Config = {
 			Paths = {"/home/operator/.steam/steam/steamapps"};
 			Launchers = {"Steam"};
 			Scan = function(CollectionConfig)
-				print"???"
-				local CollectionTotal = 0
 				local List = {
 					UITree.Output.Text("Loading",{},"Loading...")
 				}
 				coroutine.wrap(
 					function()
-						local url = string.format("http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=%s&steamid=%s&format=json&include_appinfo=1", SteamConfig.Key, SteamConfig.UserID)
-						local res, data = http.request("GET", url)
-						table.remove(List)
+						local url = (
+							"http://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/?key=%s&steamid=%s&format=json&include_appinfo=1"
+						):format(
+							SteamConfig.Key, SteamConfig.UserID
+						)
+						local _, data = http.request("GET", url)
 						local decodedResponse = json.decode(data)
+						
+						table.remove(List)
+						
 						for _, Game in pairs(decodedResponse.response.games) do
 							local Installed = false
 							for _, Path in pairs(CollectionConfig.Paths) do
@@ -199,19 +203,21 @@ local Config={Colors = Colors}; Config = {
 									break
 								end
 							end
-							CollectionTotal = CollectionTotal + 1
+							
 							table.insert(
 								List,
-								UITree.Input.Action(
-									Game.name, {Color = Installed and Config.Colors.Steam.Installed or nil}, Game.name .. (Installed and " [Installed]" or ""),
-									function()
-										love.window.setFullscreen(false)
-										Config.Launchers.Steam.Launch(Game.appid)
-										AppExitedAt = os.time()
-									end
+								UITree.Input.Choice.Option(
+									Game.name, UITree.Output.Text(
+										"Name", { 
+											Color = Installed and Config.Colors.Steam.Installed or nil
+										}, 
+										Game.name .. (Installed and " [Installed]" or "")
+									),
+									Game.appid
 								)
 							)
 						end
+						
 						table.sort(
 							List, function(Left, Right)
 								return Left.Name < Right.Name

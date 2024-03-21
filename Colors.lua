@@ -6,6 +6,7 @@ return {
 	Title = RGB(73, 56, 0, 127);
 	Background = RGB(170, 144, 57);
 	Text = RGB(255, 240, 218);
+	Selected = RGB(0, 255, 0); --TODO better color
 	Card = {
 		Border = RGB(154, 166, 178);
 		Focused = {

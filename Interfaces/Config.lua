@@ -53,7 +53,7 @@ return function(Config, Services)
 						OBSRunning.Value = false
 						OBSService = nil
 					else
-						OBSService = OBS(StartOBSStreaming:GetValue(), StartOBSRecording:GetValue(), "SoonSoon", 4455, "wiorfajesfoijdsfioasji")
+						OBSService = OBS(StartOBSStreaming:GetValue(), StartOBSRecording:GetValue(), "SoonSoon", 4455, "boners69")
 						Services:Add(OBSService)
 						OBSRunning.Value = true
 					end
