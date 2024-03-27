@@ -1,158 +1,139 @@
-local lfs = require"lfs"
-local http = require"coro-http-luv"
-local json = require"dkjson"
-local posix = require"posix"
 local websocket = require"http.websocket"
-local lsha2 = require"lsha2"
-local mime = require"mime" --All of the above are here because of a bug in Moonrise.Import that I've been too lazy to fix
+local mime = require"mime" --All of these unused requires are here because of a bug in Moonrise.Import that I've been too lazy to fix
+
 local luv = require"luv"
+local sqlite3 = require"lsqlite3"
 
 package.path = package.path ..";./?/init.lua"
 
 require "Moonrise.Import.Install".All()
 
+local UITree = require"UITree"
+
 local Config = require"Config"
 local Colors = Config.Colors
-local OOP = require"Moonrise.OOP"
-local UITree = require"UITree"
-local FocusHandler = require"FocusHandler"
 local Service = require"Service"
-local Deck = require"Deck"
-local TextMode = require"Renderers.TextMode"
+local Set = require"Controllers.Set"
+local Modal = require"Controllers.Modal"
+local TextInput = require"Controllers.TextInput"
+
+local Database = sqlite3.open"Data.db"
+
+Database:exec[[
+	CREATE TABLE IF NOT EXISTS ListEntries (
+		List TEXT,
+		Collection TEXT,
+		Name TEXT,
+		Identifier TEXT
+	);
+]]
 
 local Oops = {
 	AppExitedAt = 0;
 	ContainerHalfHeight = 20;
+	Database = Database;
 }
 
 local Services = Service.Pool()
-local ConfigInterface = require"Interfaces.Config"(Config, Services)
-local CollectionsInterface = require"Interfaces.Collections"(Config, Oops)
-local ListsInterface = require"Interfaces.Lists"(Config, CollectionsInterface)
-local CardFocus = require"FocusHandler"()
-local RenderTarget = require"Renderers.TextMode"(Config.Colors.Text, Oops, CardFocus)
 
-local CollectionIndex = 1
---CardFocus:SwitchFirstFocus(1, CollectionsInterface.Children[CollectionIndex])
-CardFocus:PushFocus(CollectionsInterface.Children[CollectionIndex], 1)
-CardFocus:SwitchNextFocus(true)
+local Decks = UITree.Collection"Decks"
+Oops.Decks = Decks
+
+local ConfigInterface = require"Interfaces.Config"(Config, Services)
+Decks:Add(ConfigInterface)
+local ListsInterface, Lists = require"Interfaces.Lists"(Config, Oops)
+Decks:Add(ListsInterface)
+Oops.Lists = Lists
+Oops.ListsInterface = ListsInterface
+local CollectionsInterface = require"Interfaces.Collections"(Config, Oops)
+Decks:Add(CollectionsInterface)
 
 local GlobalFont
-function love.load()
-	math.randomseed(os.time())
-    GlobalFont = love.graphics.newFont("GlobalFont.ttf",12)
+local TextHeight
 
-    love.graphics.setFont(GlobalFont)
+local function CalculateHalfHeight(Height)
+	return math.floor((Height-(Config.Inset.Top+Config.Inset.Bottom+10))/TextHeight/2)
 end
 
-local NextTwitch = 0
+function love.load()
+	math.randomseed(os.time())
+	GlobalFont = love.graphics.newFont("GlobalFont.ttf",12)
+	Oops.DefaultFont = love.graphics.getFont()
+	love.graphics.setFont(GlobalFont)
+	TextHeight = love.graphics.newText(love.graphics.getFont(),"|"):getHeight()
+	Oops.ContainerHalfHeight = CalculateHalfHeight(love.graphics.getHeight())
+end
+
 local ActiveController
-local UpHeld, DownHeld, LeftHeld, RightHeld = false, false, false, false
-local Decks = {
-	Deck(ConfigInterface);
-	Deck(CollectionsInterface);
-	Deck(ListsInterface);
-}
-local ActiveSetIndex = 2
-local ActiveDeck = Decks[ActiveSetIndex]
+Oops.DialogStack = {};
+table.insert(
+	Oops.DialogStack,
+	Set(
+		{
+			Set.Deck(ConfigInterface);
+			Set.Deck(CollectionsInterface);
+			Set.Deck(ListsInterface);
+		},
+		2,
+		Config,
+		Config.Colors,
+		Oops
+	)
+)
 
-local DialogStack = {
-	
-}
+love.keyboard.setKeyRepeat(true)
 
+function love.keypressed(key, scancode, isRepeat)
+	Oops.DialogStack[#Oops.DialogStack]:KeyPressed(key, scancode, isRepeat)
+end
+
+function love.keyreleased(key, scancode)
+	Oops.DialogStack[#Oops.DialogStack]:KeyReleased(key, scancode)
+end
+
+function love.textinput(text)
+	Oops.DialogStack[#Oops.DialogStack]:TextInput(text)
+end
+
+function love.mousepressed(mx, my, mbutton, pressCount)
+	Oops.DialogStack[#Oops.DialogStack]:MousePressed(mx, my, mbutton, pressCount)
+end
+function love.mousemoved(mx, my)
+	Oops.DialogStack[#Oops.DialogStack]:MouseMoved(mx, my)
+end
+function love.mousereleased(mx, my, mbutton)
+	Oops.DialogStack[#Oops.DialogStack]:MouseReleased(mx, my, mbutton)
+end
+function love.wheelmoved(dx, dy)
+	Oops.DialogStack[#Oops.DialogStack]:WheelMoved(dx, dy)
+end
 function love.gamepadpressed(Controller, Button)
 	if love.timer.getTime() <= Oops.AppExitedAt+1/30 then return end
 	
-	ActiveController = Controller
-	local CurrentFocus = CardFocus:GetFocus()
-	if (Controller:isGamepadDown"guide") then
+	if Controller:isGamepadDown"guide" then
 		if Controller:isGamepadDown"back" then
 			love.event.quit(0)
 		elseif Controller:isGamepadDown"start" then
-			love.window.setFullscreen(not love.window.getFullscreen(),"desktop")
-		elseif Controller:isGamepadDown"dpup" then
-
-			ActiveSetIndex = math.max(ActiveSetIndex-1,1)
-			ActiveDeck = Decks[ActiveSetIndex]
-			CardFocus:Clear()
-			CardFocus:PushFocus(ActiveDeck:GetUI(), 1)
-			CardFocus:SwitchNextFocus(true)
-		elseif Controller:isGamepadDown"dpdown" then
-			ActiveSetIndex = math.min(ActiveSetIndex+1,#Decks)
-			ActiveDeck = Decks[ActiveSetIndex]
-			CardFocus:Clear()
-			CardFocus:PushFocus(ActiveDeck:GetUI(), 1)
-			CardFocus:SwitchNextFocus(true)
+			love.window.setFullscreen(not(love.window.getFullscreen()),"desktop")
+		else
+			Oops.DialogStack[#Oops.DialogStack]:GamepadPressed(Controller, Button)
 		end
-	elseif Button == "leftshoulder" then
-		ActiveDeck:ShiftLeft()
-		CardFocus:Clear()
-		CardFocus:PushFocus(ActiveDeck:GetUI(), 1)
-		CardFocus:SwitchNextFocus(true)
-	elseif Button == "rightshoulder" then
-		ActiveDeck:ShiftRight()
-		CardFocus:Clear()
-		CardFocus:PushFocus(ActiveDeck:GetUI(), 1)
-		CardFocus:SwitchNextFocus(true)
-	elseif Button == "dpdown" then
-		CardFocus:SwitchNextFocus()
-		DownHeld = true
-		NextTwitch = love.timer.getTime() + 0.25
-	elseif Button == "dpup" then
-		CardFocus:SwitchPrevFocus()
-		UpHeld = true
-		NextTwitch = love.timer.getTime() + 0.25
-	elseif Button == "dpleft" and OOP.Reflection.Type.Of(UITree.Input.Choice, CardFocus:GetFocus()) and CardFocus:GetFocus().Selected > 1 then
-		CardFocus:GetFocus().Selected = CardFocus:GetFocus().Selected - 1
-		LeftHeld = true
-		NextTwitch = love.timer.getTime() + 0.25
-	elseif Button == "dpright" and OOP.Reflection.Type.Of(UITree.Input.Choice, CardFocus:GetFocus()) and CardFocus:GetFocus().Selected < #CardFocus:GetFocus().Children then
-		CardFocus:GetFocus().Selected = CardFocus:GetFocus().Selected + 1
-		RightHeld = true
-		NextTwitch = love.timer.getTime() + 0.25
-	elseif Button == "b" or Button == "a" or Button == "x" or Button == "y" then
-		if (OOP.Reflection.Type.Of(UITree.Input.Action, CurrentFocus)) then
-			CurrentFocus:Execute()
-		elseif OOP.Reflection.Type.Of(UITree.Input.Boolean, CurrentFocus) then
-			CurrentFocus:SetValue(not CurrentFocus:GetValue())
-		end
+	else
+		Oops.DialogStack[#Oops.DialogStack]:GamepadPressed(Controller, Button)
 	end
 end
 
 function love.gamepadreleased(Controller, Button)
-	if Button == "dpdown" then
-		DownHeld = false
-	elseif Button == "dpup" then
-		UpHeld = false
-	elseif Button == "dpleft" then
-		LeftHeld = false
-	elseif Button == "dpright" then
-		RightHeld = false
-	end
+	Oops.DialogStack[#Oops.DialogStack]:GamepadReleased(Controller, Button)
 end
 
-function love.update(dt)
+function love.update(Delta)
 	luv.run"nowait"
-	if ActiveController and love.timer.getTime() >= NextTwitch then
-		if UpHeld then
-			CardFocus:SwitchPrevFocus()
-			NextTwitch = love.timer.getTime() + 0.025
-		elseif DownHeld then
-			CardFocus:SwitchNextFocus()
-			NextTwitch = love.timer.getTime() + 0.025
-		elseif LeftHeld and OOP.Reflection.Type.Of(UITree.Input.Choice, CardFocus:GetFocus()) and CardFocus:GetFocus().Selected > 1 then
-			CardFocus:GetFocus().Selected = CardFocus:GetFocus().Selected - 1
-			NextTwitch = love.timer.getTime() + 0.025
-		elseif RightHeld and OOP.Reflection.Type.Of(UITree.Input.Choice, CardFocus:GetFocus()) and CardFocus:GetFocus().Selected < #CardFocus:GetFocus().Children then
-			CardFocus:GetFocus().Selected = CardFocus:GetFocus().Selected + 1
-			NextTwitch = love.timer.getTime() + 0.025
-		end
-	end
+	Oops.DialogStack[#Oops.DialogStack]:Update(Delta)
 end
 
-local TextHeight = love.graphics.newText(love.graphics.getFont(),"|"):getHeight()
 function love.resize(Width, Height)
-	Oops.ContainerHalfHeight = math.floor(Height/TextHeight/2.5);
+	Oops.ContainerHalfHeight = CalculateHalfHeight(Height)
 end
 
 local function DrawBackground()
@@ -167,111 +148,17 @@ local function DrawBackground()
 	end
 end
 
-local function DrawTitle()
-	--[[local CollectionTotal = 0
-	for _, CollectionInterface in pairs(CollectionsInterface.Children) do
-		CollectionTotal = CollectionTotal + #CollectionInterface.Children[2].Children
-	end
-	local TitleText = love.graphics.newText(love.graphics.getFont(), CollectionTotal .." games across ".. #CollectionsInterface.Children .." collections")
-	love.graphics.setColor(Colors.Title)
-	love.graphics.rectangle("fill",0,0,love.graphics.getWidth(),TitleText:getHeight())
-	love.graphics.setColor(Colors.Text)
-	love.graphics.draw(TitleText)]]
-end
-
 local function DrawIndicator()
 	if ActiveController and ActiveController:isGamepadDown"guide" then
 		love.graphics.rectangle("fill", love.graphics.getWidth()-50,0,50,50)
 	end
 end
 
-local function DrawCard(CardOrigin, CardSize, CardColor, ShadowColor, BorderColor, ShadowOffset, CardBorder)
-	local ShadowOrigin = {
-		CardOrigin[1]-ShadowOffset,
-		CardOrigin[2]-ShadowOffset
-	}
-	local BorderOrigin = {
-		CardOrigin[1]-CardBorder,
-		CardOrigin[2]-CardBorder
-	}
-	local BorderSize = {
-		CardSize[1]+CardBorder*2,
-		CardSize[2]+CardBorder*2
-	}
-	love.graphics.setScissor(
-		ShadowOrigin[1], ShadowOrigin[2],
-		CardSize[1], CardSize[2]
-	)
-	love.graphics.clear(ShadowColor)
-	love.graphics.setScissor(
-		BorderOrigin[1], BorderOrigin[2],
-		BorderSize[1], BorderSize[2]
-	)
-	love.graphics.clear(BorderColor)
-	love.graphics.setScissor(
-		CardOrigin[1], CardOrigin[2],
-		CardSize[1], CardSize[2]
-	)
-	love.graphics.clear(CardColor)
-end
-
-local function DrawCards()
-	for Offset = -Config.CardsLeft,Config.CardsRight do
-		local CollectionInterface = ActiveDeck:GetUI(Offset)
-		if CollectionInterface then
-			RenderTarget:Clear()
-			RenderTarget:Render(CollectionInterface)
-			
-			local TextObject = love.graphics.newText(love.graphics.getFont(),"")
-			TextObject:add(RenderTarget.TextStrings,0,0)
-			
-			local CardColor = Colors.Card.Unfocused.Body
-			local CardShadow = Colors.Card.Unfocused.Shadow
-			
-			if (Offset == 0) then 
-				CardColor = Colors.Card.Focused.Body
-				CardShadow = Colors.Card.Focused.Shadow
-			end
-			
-			local CardOrigin = {
-				(Offset+Config.CardsLeft)*love.graphics.getWidth()/(Config.CardsLeft+Config.CardsRight+1)+Config.CardMargin/2,
-				Config.Inset.Top
-			}
-			local CardSize = {
-				love.graphics.getWidth()/(Config.CardsLeft+Config.CardsRight+1)-Config.CardMargin, 
-				math.min(
-					TextObject:getHeight() + (Offset ~= 0 and Config.UnfocusedCardShrink*2 or 0), 
-					love.graphics.getHeight()-(Config.Inset.Top+Config.Inset.Bottom)
-				)
-			}
-			
-			if Offset ~= 0 then
-				CardOrigin[1] = CardOrigin[1] + Config.UnfocusedCardShrink
-				CardOrigin[2] = CardOrigin[2] + Config.UnfocusedCardShrink
-				CardSize[1] = CardSize[1] - Config.UnfocusedCardShrink*2
-				CardSize[2] = CardSize[2] - Config.UnfocusedCardShrink*2
-			end
-			
-			DrawCard(
-				CardOrigin, CardSize,
-				CardColor, CardShadow, Colors.Card.Border,
-				Config.ShadowOffset, Config.CardBorder
-			)
-			love.graphics.setColor(Colors.Text)
-			love.graphics.draw(
-				TextObject,
-				math.floor(CardOrigin[1]), math.floor(CardOrigin[2])
-			)
-		end
-		
-		love.graphics.setScissor()
-	end
-end
-
 function love.draw()
 	DrawBackground()
-	DrawTitle()
-	DrawCards()
+	for _, Dialog in pairs(Oops.DialogStack) do
+		Dialog:Draw()
+	end
 	DrawIndicator()
 end
 

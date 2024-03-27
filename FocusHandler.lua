@@ -77,9 +77,10 @@ function FocusHandler:FindPrevFocus(IncludeCurrent)
 		local SkipPop = false
 		for Index = Current.Index, 1, -1 do
 			Current.Index = Index
-			if (not (Current.Container == self.Stack:Top().Container and Current.Index == self.Stack:Top().Index) or IncludeCurrent) and OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) then
+			if not (Current.Container == self.Stack:Top().Container and Current.Index == self.Stack:Top().Index) and (OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) and not OOP.Reflection.Type.Of(UITree.Input.Form, Current.Container.Children[Index])) then
+				print(Current.Container.Children[Index])
 				return NewStack
-			elseif OOP.Reflection.Type.Of(UITree.Collection, Current.Container.Children[Index]) and not OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) then
+			elseif OOP.Reflection.Type.Of(UITree.Collection, Current.Container.Children[Index]) and (not OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) or OOP.Reflection.Type.Of(UITree.Input.Form, Current.Container.Children[Index])) then
 				NewStack:Push(Current.Container.Children[Index], #Current.Container.Children[Index].Children)
 				SkipPop = true
 				break
@@ -105,10 +106,10 @@ function FocusHandler:FindNextFocus(IncludeCurrent)
 		local SkipPop = false
 		for Index = Current.Index, #Current.Container.Children do
 			Current.Index = Index
-			if (not (Current.Container == self.Stack:Top().Container and Current.Index == self.Stack:Top().Index) or IncludeCurrent) and OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) then
+			if not (Current.Container == self.Stack:Top().Container and Current.Index == self.Stack:Top().Index) and (OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) and not OOP.Reflection.Type.Of(UITree.Input.Form, Current.Container.Children[Index])) then
 				return NewStack
-			elseif OOP.Reflection.Type.Of(UITree.Collection, Current.Container.Children[Index]) and not OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index]) then
-				NewStack:Push(Current.Container.Children[Index], 1)
+			elseif OOP.Reflection.Type.Of(UITree.Collection, Current.Container.Children[Index]) and ((not OOP.Reflection.Type.Of(UITree.Input.Base, Current.Container.Children[Index])) or OOP.Reflection.Type.Of(UITree.Input.Form, Current.Container.Children[Index])) then
+				NewStack:Push(Current.Container.Children[Index], 0)
 				SkipPop = true
 				break
 			end

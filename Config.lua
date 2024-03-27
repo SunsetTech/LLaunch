@@ -1,12 +1,38 @@
 local http = require"coro-http-luv"
 local json = require"dkjson"
 local posix = require"posix"
+local Process = require"Moonrise.System.Posix.Process"
 local lfs = require"lfs"
+local luv = require"luv"
 local Colors = require"Colors"
 local SteamConfig = require"SteamConfig"
 local UITree = require"UITree"
 
 local ShadowOffset = 8
+
+local function LaunchProcess(Program, Arguments)
+	local PID, Input, Output, Error = Process.Open(Program, Arguments)
+	local Routine = coroutine.create(
+		function()
+			local OutputPoller = luv.new_poll(Output)
+			local Exited = false
+			luv.poll_start(
+				OutputPoller, "rd",
+				function(Error, Events)
+					if luv.fs_read(Output,1) == "" then
+						Exited = true
+						luv.poll_stop(OutputPoller)
+					end
+				end
+			)
+			repeat
+				coroutine.yield()
+			until Exited
+		end
+	)
+	return Routine
+end
+
 local Config={Colors = Colors}; Config = {
 	StartInFocusmode = true;
 	ShadowOffset = ShadowOffset;
@@ -25,89 +51,67 @@ local Config={Colors = Colors}; Config = {
 		Native = {
 			Label = "Native";
 			Launch = function(Path)
-				os.execute(
-					([["%s"]]):format(Path)
-				)
+				return LaunchProcess(Path)
 			end;
 		};
 		Wine = {
 			Label = "Wine";
 			Launch = function(Path)
-				os.execute(
-					([[wine "%s"]]):format(posix.realpath(Path))
-				)
+				return LaunchProcess("wine", {posix.realpath(Path)})
 			end;
 		};
 		Steam = {
 			Label = "Steam";
 			Launch = function(AppID)
-				os.execute(
-					([[steam -applaunch %i]]):format(AppID)
-				)
+				return LaunchProcess("steam",{"-applaunch",AppID})
 			end;
 		};
 		Yuzu = {
 			Label = "Yuzu";
 			Launch = function(Path)
-				os.execute(
-					([[yuzu -f -g "%s"]]):format(Path)
-				)
+				return LaunchProcess("yuzu", {"-f", "-g", Path})
 			end;
 		};
 		Ryujinx = {
 			Label = "Ryujinx";
 			Launch = function(Path)
-				os.execute(
-					([[Ryujinx "%s"]]):format(Path)
-				)
+				return LaunchProcess("Ryujinx", {Path})
 			end;
 		};
 		RetroArch_Dolphin = {
 			Label = "RetroArch (Dolphin)";
 			Launch = function(Path)
-				os.execute(
-					([[retroarch -L dolphin "%s"]]):format(Path)
-				)
+				return LaunchProcess("retroarch", {"-L", "dolphin", Path})
 			end;
 		};
 		RetroArch_ParaLLEl = {
 			Label = "RetroArch (ParaLLEl)",
 			Launch = function(Path)
-				os.execute(
-					([[retroarch -L parallel_n64 "%s"]]):format(Path)
-				)
+				return LaunchProcess("retroarch", {"-L", "parallel_n64", Path})
 			end;
 		};
 		RetroArch_BSNES = {
 			Label = "RetroArch (BSNES)",
 			Launch = function(Path)
-				os.execute(
-					([[retroarch -L bsnes "%s"]]):format(Path)
-				)
+				return LaunchProcess("retroarch", {"-L", "bsnes", Path})
 			end
 		};
 		RetroArch_Sameboy = {
 			Label = "RetroArch (Sameboy)";
 			Launch = function(Path)
-				os.execute(
-					([[retroarch -L sameboy "%s"]]):format(Path)
-				)
+				return LaunchProcess("retroarch", {"-L", "sameboy", Path})
 			end;
 		};
 		RetroArch_mGBA = {
 			Label = "RetroArch (mGBA)";
 			Launch = function(Path)
-				os.execute(
-					([[retroarch -L mgba "%s"]]):format(Path)
-				)
+				return LaunchProcess("retroarch", {"-L", "mgba", Path})
 			end;
 		};
 		Cemu = {
 			Label = "Cemu",
 			Launch = function(Path)
-				os.execute(
-					([[cemu -f -g "%s/title.tmd"]]):format(Path)
-				)
+				return LaunchProcess("cemu", {"-f", "-g", Path .."/title.tmd"})
 			end
 		};
 	};
